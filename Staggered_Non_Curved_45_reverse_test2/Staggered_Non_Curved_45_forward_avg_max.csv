@@ -1,6 +1,0 @@
-metric,test1,test2,test3,average
-peak_zeroed_value,-22891.0,-12169.0,-13009.7,-16023.2
-peak_time_s,4.691,2.394,4.316,3.801
-
-label,Staggered_Non_Curved_45_forward
-tare_offset,397735.7
