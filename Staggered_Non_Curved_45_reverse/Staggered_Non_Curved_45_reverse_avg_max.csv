@@ -1,0 +1,6 @@
+metric,test1,test2,test3,average
+peak_zeroed_value,-46784.3,-20197.7,-18455.0,-28479.0
+peak_time_s,2.970,2.589,1.931,2.497
+
+label,Staggered_Non_Curved_45_reverse
+tare_offset,393735.0
