@@ -19,13 +19,12 @@ Flow:
 
     ── Repeated for each named session ───────────────────────
     4.  SPACE  → enter name details
-    5.  SPACE  → 1s tare calibration (unloaded)
-    6.  SPACE  → start test 1  →  SPACE to stop
-    7.  SPACE  → 1s tare  →  SPACE  → test 2  →  SPACE to stop
-    8.  SPACE  → 1s tare  →  SPACE  → test 3  →  SPACE to stop
+    5.  SPACE  → start test 1  →  SPACE to stop
+    6.  SPACE  → start test 2  →  SPACE to stop
+    7.  SPACE  → start test 3  →  SPACE to stop
                  saves 8 files in named folder
 
-Every recorded value has BOTH friction_offset and tare_offset subtracted.
+Every recorded value has friction_offset subtracted.
 """
 
 import serial
@@ -36,42 +35,39 @@ import sys
 import os
 
 # ── Section 1: Config ────────────────────────────────────────
-SERIAL_PORT      = None
-BAUD_RATE        = 115200
-SAVE_DIR         = os.path.dirname(os.path.abspath(__file__))
-TARE_DURATION    = 1.0       # seconds for per-test tare
-NUM_FRICTION     = 3         # friction readings at startup
-NUM_TESTS        = 3
+SERIAL_PORT       = None
+BAUD_RATE         = 115200
+SAVE_DIR          = os.path.dirname(os.path.abspath(__file__))
+NUM_FRICTION      = 3
+NUM_TESTS         = 3
+
+# Newton calibration constant — from calibrate_newton.py
+COUNTS_PER_NEWTON = 2336.0
 
 # ── Section 2: Global state ──────────────────────────────────
-# Phase state machine:
-#   friction_idle → friction_recording (×3) → friction_done
-#   → idle → named → taring → ready → recording (×3) → idle
-phase            = "friction_idle"
+phase             = "friction_idle"
 
-# Friction calibration (done once at startup)
-friction_runs    = []         # list of completed friction reading lists
-friction_current = []         # active friction reading
-friction_test    = 0          # 1, 2, 3
-friction_offset  = 0.0        # avg of all values across 3 friction readings
+friction_runs     = []
+friction_current  = []
+friction_test     = 0
+friction_offset   = 0.0
 
-# Per-test tare
-tare_readings    = []
-tare_offset      = 0.0
-tare_start_ts    = None
+record_start_ts   = None
+current_test      = 0
+current_run       = []
+all_runs          = []
 
-# Recording
-record_start_ts  = None       # fresh t=0 for each test
-current_test     = 0
-current_run      = []
-all_runs         = []
+name_base         = ""
+folder_path       = ""
 
-# File naming
-name_base        = ""
-folder_path      = ""
+ser               = None
+stop_event        = threading.Event()
 
-ser              = None
-stop_event       = threading.Event()
+# ── Section 2b: Display pause flag ───────────────────────────
+# When True the serial thread stops writing \r live updates.
+# This prevents the live readout from overwriting or garbling
+# y/n prompts and input() lines while the user is typing.
+display_paused    = False
 
 COLORS = ["#378ADD", "#e07b3a", "#2ca05a"]
 
@@ -81,7 +77,7 @@ def find_port():
     for p in ports:
         desc = (p.description or "").lower()
         hwid  = (p.hwid or "").lower()
-        if any(x in desc for x in ["usbmodem", "cp210", "ch340", "esp32", "ftdi"]):
+        if any(x in desc for x in ["usbmodem", "cp210", "ch340", "esp32", "ftdi", "jtag"]):
             return p.device
         if "usb" in hwid:
             return p.device
@@ -116,11 +112,12 @@ def parse_raw(line):
 # ── Section 6: Save individual run CSV ───────────────────────
 def save_run_csv(run, path):
     with open(path, "w") as f:
-        f.write("index,time_s,value,raw_value\n")
-        f.write(f"# friction_offset={friction_offset:.1f}  tare_offset={tare_offset:.1f}\n")
+        f.write("index,time_s,value,newtons,raw_value\n")
+        f.write(f"# friction_offset={friction_offset:.1f}  counts_per_newton={COUNTS_PER_NEWTON}\n")
         for i, (t, v) in enumerate(run):
-            raw = v + tare_offset + friction_offset
-            f.write(f"{i+1},{t:.3f},{v:.0f},{raw:.0f}\n")
+            raw     = v + friction_offset
+            newtons = v / COUNTS_PER_NEWTON
+            f.write(f"{i+1},{t:.3f},{v:.0f},{newtons:.4f},{raw:.0f}\n")
     print(f"  💾 {os.path.basename(path)}")
 
 # ── Section 7: Save individual run PNG ───────────────────────
@@ -161,11 +158,11 @@ def save_run_png(run, path, test_num, label):
         ax.set_xlim(left=0, right=max(times) * 1.05)
         ax.legend(fontsize=9)
         ax.set_xlabel("Time (s)", fontsize=10)
-        ax.set_ylabel("ADC (friction + tare zeroed)", fontsize=10)
+        ax.set_ylabel("ADC (friction zeroed)", fontsize=10)
         ax.set_title(
             f"{label}  —  Test {test_num}  |  {len(run)} pts  |  "
             f"min {mn:+.0f}  max {mx:+.0f}  avg {avg:+.1f}\n"
-            f"friction offset: {friction_offset:,.0f}  tare offset: {tare_offset:,.0f}",
+            f"friction offset: {friction_offset:,.0f}",
             fontsize=10
         )
         ax.grid(True, alpha=0.15)
@@ -222,7 +219,7 @@ def save_combined_png(runs, path, label):
         ax.set_xlim(left=0, right=x_right * 1.05)
         ax.legend(fontsize=9, loc="upper left")
         ax.set_xlabel("Time (s)", fontsize=10)
-        ax.set_ylabel("ADC (friction + tare zeroed)", fontsize=10)
+        ax.set_ylabel("ADC (friction zeroed)", fontsize=10)
         ax.set_title(
             f"{label}  —  All 3 Tests  |  Avg peak: {avg_max:+.1f}  "
             f"(T1: {peaks[0]:+.0f}  T2: {peaks[1]:+.0f}  T3: {peaks[2]:+.0f})\n"
@@ -256,7 +253,7 @@ def save_avg_max_csv(runs, path, label):
         f.write("peak_time_s," + ",".join(f"{t:.3f}" for t in peak_times) + f",{avg_peak_t:.3f}\n")
         f.write(f"\nlabel,{label}\n")
         f.write(f"friction_offset,{friction_offset:.1f}\n")
-        f.write(f"tare_offset,{tare_offset:.1f}\n")
+        f.write(f"counts_per_newton,{COUNTS_PER_NEWTON:.1f}\n")
     print(f"  💾 {os.path.basename(path)}")
 
 # ── Section 10: Finalise — save all 8 files ──────────────────
@@ -275,9 +272,9 @@ def finalise():
 def keyboard_thread():
     global phase
     global friction_runs, friction_current, friction_test, friction_offset
-    global tare_readings, tare_offset, tare_start_ts
     global record_start_ts, current_test, current_run, all_runs
     global name_base, folder_path
+    global display_paused
 
     import tty, termios
     fd  = sys.stdin.fileno()
@@ -285,7 +282,32 @@ def keyboard_thread():
     def raw():    tty.setraw(fd)
     def cooked(): termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    # ── Friction calibration prompt ───────────────────────────
+    def ask_yn(prompt):
+        """
+        Safely asks a y/n question without the serial thread
+        garbling the output.
+
+        Steps:
+          1. Sets display_paused = True so serial thread stops
+             writing \r updates immediately.
+          2. Switches terminal to cooked mode so input() works.
+          3. Prints a clean newline so prompt appears on its own line.
+          4. Loops until user types y or n and presses Enter.
+          5. Restores raw mode and clears display_paused.
+        """
+        global display_paused
+        display_paused = True
+        cooked()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        while True:
+            ans = input(prompt).strip().lower()
+            if ans in ("y", "n"):
+                break
+        raw()
+        display_paused = False
+        return ans
+
     print("\n" + "=" * 46)
     print("  FRICTION CALIBRATION  (done once)")
     print("=" * 46)
@@ -314,7 +336,6 @@ def keyboard_thread():
 
             # ══ FRICTION PHASES ══════════════════════════════
 
-            # Start a friction reading
             if phase == "friction_idle":
                 friction_test   += 1
                 friction_current = []
@@ -322,33 +343,22 @@ def keyboard_thread():
                 phase            = "friction_recording"
                 print(f"\n  ● Friction reading {friction_test}/{NUM_FRICTION} — press SPACE to stop.\n")
 
-            # Stop a friction reading
             elif phase == "friction_recording":
                 print(f"\n  ■ Friction {friction_test} done — {len(friction_current)} samples.")
-
-                # ── Ask y/n to accept or repeat ──────────────
-                cooked()
-                while True:
-                    ans = input("  Accept this reading? (y/n): ").strip().lower()
-                    if ans in ("y", "n"):
-                        break
-                raw()
+                ans = ask_yn("  Accept this reading? (y/n): ")
 
                 if ans == "n":
-                    # Discard and repeat same reading number
                     friction_current = []
                     record_start_ts  = time.time()
                     phase            = "friction_recording"
                     print(f"\n  ↩  Repeating friction reading {friction_test}/{NUM_FRICTION} — press SPACE to stop.\n")
                 else:
-                    # Accept and move on
                     friction_runs.append(list(friction_current))
 
                     if friction_test < NUM_FRICTION:
                         phase = "friction_idle"
                         print(f"  Press SPACE to start friction reading {friction_test + 1}/{NUM_FRICTION}.\n")
                     else:
-                        # ── All friction readings done — compute offset ──
                         all_friction_vals = [v for run in friction_runs for _, v in run]
                         friction_offset   = sum(all_friction_vals) / len(all_friction_vals)
                         phase             = "idle"
@@ -362,8 +372,8 @@ def keyboard_thread():
 
             # ══ SESSION PHASES ════════════════════════════════
 
-            # Enter name details
             elif phase == "idle":
+                display_paused = True
                 cooked()
                 print("\n" + "─" * 46)
                 print("  New 3-test session")
@@ -380,28 +390,12 @@ def keyboard_thread():
                 current_test           = 0
 
                 print(f"\n  Folder  → {name_base}/")
-                print(f"  Press SPACE to calibrate (load cell UNLOADED).")
+                print(f"  Press SPACE to start test 1/{NUM_TESTS}.")
                 print("─" * 46 + "\n")
                 raw()
-                phase = "named"
+                display_paused = False
+                phase = "ready"
 
-            # Begin 1s tare
-            elif phase == "named":
-                tare_readings = []
-                tare_offset   = 0.0
-                tare_start_ts = time.time()
-                phase         = "taring"
-                print(f"\n  ⏱  Taring {TARE_DURATION:.0f}s — hold still...\n")
-
-            # Begin 1s tare before next test
-            elif phase == "pre_tare":
-                tare_readings = []
-                tare_offset   = 0.0
-                tare_start_ts = time.time()
-                phase         = "taring_next"
-                print(f"\n  ⏱  Taring {TARE_DURATION:.0f}s — hold still...\n")
-
-            # Start next test
             elif phase == "ready":
                 current_test    += 1
                 current_run      = []
@@ -409,20 +403,11 @@ def keyboard_thread():
                 phase            = "recording"
                 print(f"\n  ● Test {current_test}/{NUM_TESTS} — press SPACE to stop.\n")
 
-            # Stop current test
             elif phase == "recording":
                 print(f"\n  ■ Test {current_test} done — {len(current_run)} readings.")
-
-                # ── Ask y/n to accept or repeat ──────────────
-                cooked()
-                while True:
-                    ans = input("  Accept this reading? (y/n): ").strip().lower()
-                    if ans in ("y", "n"):
-                        break
-                raw()
+                ans = ask_yn("  Accept this reading? (y/n): ")
 
                 if ans == "n":
-                    # Discard and repeat same test number
                     current_run     = []
                     record_start_ts = time.time()
                     phase           = "recording"
@@ -431,8 +416,8 @@ def keyboard_thread():
                     all_runs.append(list(current_run))
 
                     if current_test < NUM_TESTS:
-                        phase = "pre_tare"
-                        print(f"  Press SPACE to calibrate then start test {current_test + 1}/{NUM_TESTS}.\n")
+                        phase = "ready"
+                        print(f"  Press SPACE to start test {current_test + 1}/{NUM_TESTS}.\n")
                     else:
                         phase = "idle"
                         cooked()
@@ -445,7 +430,7 @@ def keyboard_thread():
 
 # ── Section 12: Serial reader thread ─────────────────────────
 def serial_thread():
-    global ser, phase, tare_offset, tare_start_ts
+    global ser, phase
     global friction_current, current_run
 
     port = SERIAL_PORT or find_port()
@@ -473,8 +458,10 @@ def serial_thread():
             raw_val = parse_raw(line)
 
             if raw_val is None:
-                sys.stdout.write(f"\n  ESP32: {line}\n")
-                sys.stdout.flush()
+                # Only print ESP32 non-data messages when display is free
+                if not display_paused:
+                    sys.stdout.write(f"\n  ESP32: {line}\n")
+                    sys.stdout.flush()
                 continue
 
             now = time.time()
@@ -482,45 +469,25 @@ def serial_thread():
             # ── Friction recording ────────────────────────────
             if phase == "friction_recording":
                 elapsed = now - record_start_ts
-                # No offsets applied yet — this IS the baseline
                 friction_current.append((elapsed, float(raw_val)))
-                sys.stdout.write(
-                    f"\r  Friction {friction_test}  [{len(friction_current):>5} pts]  "
-                    f"raw: {raw_val:>12,}   "
-                )
-                sys.stdout.flush()
-
-            # ── Tare phase (initial or between tests) ─────────
-            elif phase in ("taring", "taring_next"):
-                elapsed = now - tare_start_ts
-                tare_readings.append(raw_val)
-                remaining = max(0.0, TARE_DURATION - elapsed)
-                sys.stdout.write(
-                    f"\r  Taring... {remaining:.1f}s  ({len(tare_readings)} samples)   "
-                )
-                sys.stdout.flush()
-
-                if elapsed >= TARE_DURATION:
-                    tare_offset = sum(tare_readings) / len(tare_readings)
-                    next_t      = current_test + 1
-                    phase       = "ready"
+                if not display_paused:
                     sys.stdout.write(
-                        f"\r  ✅ Tare done. Offset = {tare_offset:,.0f}                        \n"
-                        f"  Press SPACE to start test {next_t}/{NUM_TESTS}.\n\n"
+                        f"\r  Friction {friction_test}  [{len(friction_current):>5} pts]  "
+                        f"raw: {raw_val:>12,}   "
                     )
                     sys.stdout.flush()
 
             # ── Test recording ────────────────────────────────
             elif phase == "recording":
                 elapsed = now - record_start_ts
-                # Subtract BOTH offsets: friction baseline + per-test tare
-                zeroed  = raw_val - friction_offset - tare_offset
+                zeroed  = raw_val - friction_offset
                 current_run.append((elapsed, zeroed))
-                sys.stdout.write(
-                    f"\r  Test {current_test}  [{len(current_run):>5} pts]  "
-                    f"zeroed: {zeroed:>+10.0f}  raw: {raw_val:>12,}   "
-                )
-                sys.stdout.flush()
+                if not display_paused:
+                    sys.stdout.write(
+                        f"\r  Test {current_test}  [{len(current_run):>5} pts]  "
+                        f"zeroed: {zeroed:>+10.0f}  raw: {raw_val:>12,}   "
+                    )
+                    sys.stdout.flush()
 
         except serial.SerialException:
             print("\n⚠️  Serial disconnected.")
@@ -531,6 +498,8 @@ def serial_thread():
 if __name__ == "__main__":
     print("=" * 46)
     print("  HX711 Logger — 3-Test Mode")
+    print("=" * 46)
+    print(f"  Calibration: {COUNTS_PER_NEWTON:.1f} counts/N")
     print("=" * 46)
 
     st = threading.Thread(target=serial_thread, daemon=True)
@@ -545,4 +514,4 @@ if __name__ == "__main__":
         stop_event.set()
         if ser and ser.is_open:
             ser.close()
-        print("Goodbye.")
+        print("Goodbye.")  

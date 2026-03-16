@@ -1,0 +1,7 @@
+metric,test1,test2,test3,average
+peak_value,-1817.3,-1830.3,-1684.3,-1777.3
+peak_time_s,3.968,4.278,2.797,3.681
+
+label,Staggered_Non_Curved_45_forward_set2
+friction_offset,348983.3
+counts_per_newton,2336.0
