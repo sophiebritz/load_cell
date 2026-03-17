@@ -1,0 +1,7 @@
+metric,test1,test2,test3,average
+peak_value,-1443,-1813.0,-1716.0,-1657.3
+peak_time_s,2.003,2.141,1.964,2.036
+
+label,Simple_Angled_Stalk_45_reverse
+friction_offset,348983.3
+counts_per_newton,2336.0

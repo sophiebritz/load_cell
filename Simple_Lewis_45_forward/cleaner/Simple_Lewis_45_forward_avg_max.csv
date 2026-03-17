@@ -1,0 +1,7 @@
+metric,test1,test2,test3,average
+peak_value,1170.0,-1157.0,-750,-245.7
+peak_time_s,8.717,2.417,0.999,4.044
+
+label,Simple_Lewis_45_forward
+friction_offset,348983.3
+counts_per_newton,2336.0
