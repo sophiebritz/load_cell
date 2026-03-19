@@ -1,7 +1,6 @@
 """
 HX711 Newton Calibration
 -------------------------
-Run this SEPARATELY to find your counts-per-Newton constant.
 
 Steps:
     1. Script connects to ESP32
@@ -89,16 +88,16 @@ def serial_thread():
 
     port = find_port()
     if not port:
-        print("❌ No serial port found. Is your ESP32 plugged in?")
+        print("No serial port found. Is your ESP32 plugged in?")
         stop_event.set()
         return
 
-    print(f"🔌 Connecting to {port} at {BAUD_RATE} baud...")
+    print(f" Connecting to {port} at {BAUD_RATE} baud...")
     try:
         ser = serial.Serial(port, BAUD_RATE, timeout=1)
-        print(f"✅ Connected to {port}\n")
+        print(f" Connected to {port}\n")
     except Exception as e:
-        print(f"❌ Could not open {port}: {e}")
+        print(f"Could not open {port}: {e}")
         print("   → Close PlatformIO serial monitor first.")
         stop_event.set()
         return
@@ -161,7 +160,7 @@ def serial_thread():
                 sample_readings.append(zeroed)
 
                 sys.stdout.write(
-                    f"\r  📏 Sampling... {remaining:.1f}s  "
+                    f"\r   Sampling... {remaining:.1f}s  "
                     f"({len(sample_readings)} samples)  "
                     f"zeroed: {zeroed:>+10.0f}   "
                 )
@@ -174,7 +173,7 @@ def serial_thread():
                     counts_per_newton = avg_counts / KNOWN_FORCE_N
 
                     print(f"\n\n{'=' * 46}")
-                    print(f"  ✅ CALIBRATION COMPLETE")
+                    print(f"  CALIBRATION COMPLETE")
                     print(f"{'=' * 46}")
                     print(f"  Known force applied : {KNOWN_FORCE_N} N")
                     print(f"  Tare offset         : {tare_offset:,.0f} counts")

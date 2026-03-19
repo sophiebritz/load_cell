@@ -1,7 +1,6 @@
 """
 HX711 Logger — 3-Test Mode
 ---------------------------
-Run in VS Code terminal (NOT PlatformIO serial monitor).
 
 Install deps once:
     pip install pyserial matplotlib

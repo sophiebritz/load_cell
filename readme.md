@@ -62,8 +62,8 @@ You should see:
 ==============================================
   HX711 Logger — 3-Test Mode
 ==============================================
-🔌 Connecting to /dev/cu.usbmodem101 at 115200 baud...
-✅ Connected.
+Connecting to /dev/cu.usbmodem101 at 115200 baud...
+Connected.
 
   Press SPACE to begin.
 ```

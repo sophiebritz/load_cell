@@ -1,7 +1,0 @@
-metric,test1,test2,test3,average
-peak_value,1327.0,1131,1338.0,1265.3
-peak_time_s,0.336,4.575,3.900,2.937
-
-label,Simple_Stalk_45_reverse
-friction_offset,348983.3
-counts_per_newton,2336.0

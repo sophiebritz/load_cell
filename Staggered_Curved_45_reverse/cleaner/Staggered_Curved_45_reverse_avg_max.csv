@@ -1,7 +1,0 @@
-metric,test1,test2,test3,average
-peak_value,-1557.0,1445.0,1046,311.3
-peak_time_s,3.801,3.025,5.361,4.062
-
-label,Staggered_Curved_45_reverse
-friction_offset,348983.3
-counts_per_newton,2336.0

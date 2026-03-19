@@ -1,6 +1,6 @@
 metric,test1,test2,test3,average
-peak_value,-1577.3,-1248.3,-78.3,-968.0
-peak_time_s,2.605,4.130,1.898,2.878
+peak_value,3904,6120.0,7502.0,5842.0
+peak_time_s,2.605,1.124,2.403,2.044
 
 label,Staggered_Non_Curved_45_reverse
 friction_offset,348983.3

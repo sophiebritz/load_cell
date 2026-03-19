@@ -1,6 +1,6 @@
 metric,test1,test2,test3,average
-peak_value,-1471.3,-1954.3,-800.3,-1408.6
-peak_time_s,3.466,1.660,2.928,2.685
+peak_value,1995.0,-1954.0,988,343.0
+peak_time_s,0.462,1.660,0.423,0.848
 
 label,Staggered_Curved_45_forward
 friction_offset,348983.3
